@@ -1,4 +1,3 @@
-
 import os
 import time
 import logging
@@ -6,14 +5,18 @@ from flask import Flask
 from threading import Thread
 from deriv_ws_client import DerivWebSocketClient
 from ai_strategy_manager import AdvancedStrategyManager
-from config import BASE_STAKE, TRADE_GAP, TARGET_PROFIT, MAX_PROFIT, STOP_LOSS
+
+# Config values - adjust these or import from config.py if you want
+BASE_STAKE = 2          # Starting stake amount in USD
+TRADE_GAP = 5           # Seconds between trades
+MAX_PROFIT = 10000      # Target profit to stop the bot
 
 # Flask app for Railway keep-alive
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# API Token and PIN from env
+# API Token from environment variables
 REQUIRED_PIN = os.getenv("REQUIRED_PIN", "5667")
 DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN", "YOUR_API_TOKEN")
 
@@ -27,6 +30,17 @@ def run_flask():
 def start_flask_server():
     Thread(target=run_flask).start()
 
+def get_dynamic_stop_loss(profit):
+    """
+    Returns dynamic stop loss based on current total profit:
+    If profit is 10 -> SL = 5
+    If profit is 20 -> SL = 15
+    If profit is 30 -> SL = 25
+    and so on...
+    """
+    base = int(profit // 10) * 10
+    return max(0, base - 5)
+
 def main():
     logger.info("🔥 Live Deriv AI Trading Bot Started")
     start_flask_server()
@@ -35,13 +49,14 @@ def main():
     strategy = AdvancedStrategyManager()
     stake = BASE_STAKE
     total_profit = 0.0
+    stop_loss = get_dynamic_stop_loss(total_profit)
 
     while True:
         balance = client.get_balance()
         logger.info(f"💼 Account Balance: ${balance:.2f}")
 
-        if balance <= STOP_LOSS:
-            logger.warning("🛑 Stop Loss Hit. Halting Trading.")
+        if total_profit <= stop_loss:
+            logger.warning(f"🛑 Dynamic Stop Loss Hit (${stop_loss:.2f}). Halting Trading.")
             break
 
         if total_profit >= MAX_PROFIT:
@@ -55,6 +70,8 @@ def main():
         logger.info(f"🧾 Trade Result: ${profit:.2f} | Total Profit: ${total_profit:.2f}")
 
         stake = strategy.adapt_stake(profit, stake)
+        stop_loss = get_dynamic_stop_loss(total_profit)
+
         time.sleep(TRADE_GAP)
 
 if __name__ == "__main__":
