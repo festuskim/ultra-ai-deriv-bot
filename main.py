@@ -10,9 +10,8 @@ app = Flask(__name__)
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Directly setting the API token (⚠️ FOR TESTING ONLY - DO NOT COMMIT TO PUBLIC REPO)
 REQUIRED_PIN = os.getenv("REQUIRED_PIN", "5667")
-DERIV_API_TOKEN = "***********CtBt"  # ⚠️ REPLACE THIS with os.getenv("DERIV_API_TOKEN") in production
+DERIV_API_TOKEN = "***********CtBt" 
 
 @app.route("/")
 def index():
