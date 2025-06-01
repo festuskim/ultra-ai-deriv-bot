@@ -10,13 +10,13 @@ app = Flask(__name__)
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Get API token and PIN from environment variables
+# Directly setting the API token (⚠️ FOR TESTING ONLY - DO NOT COMMIT TO PUBLIC REPO)
 REQUIRED_PIN = os.getenv("REQUIRED_PIN", "5667")
-DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN", "YOUR_API_TOKEN")
+DERIV_API_TOKEN = "***********CtBt"  # ⚠️ REPLACE THIS with os.getenv("DERIV_API_TOKEN") in production
 
 @app.route("/")
 def index():
-    return f"🤖 ULTRA AI BOT RUNNING | PIN: {REQUIRED_PIN} | API: {'SET' if DERIV_API_TOKEN != 'YOUR_API_TOKEN' else 'NOT SET'}"
+    return f"🤖 ULTRA AI BOT RUNNING | PIN: {REQUIRED_PIN} | API: {'SET' if DERIV_API_TOKEN else 'NOT SET'}"
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
@@ -25,7 +25,7 @@ def start_flask_server():
     Thread(target=run_flask).start()
 
 def main():
-    logger.info("🤖 Starting ULTRA AI BOT with Risk-Managed Machine Learning")
+    logger.info("🤖 Starting ULTRA AI BOT with Real Deriv API Support")
     start_flask_server()
 
     strategy_manager = AdvancedStrategyManager()
@@ -40,11 +40,10 @@ def main():
         logger.info(f"💰 Simulated profit: {simulated_profit:.2f} | Total profit: {total_profit:.2f}")
 
         if total_profit >= 10:
-            stake *= 2  # Increase stake after $10 profit
+            stake *= 2
             logger.info(f"🚀 Stake increased to ${stake:.2f} based on AI gain")
-
         else:
-            stake = max(1.0, stake + max(0, simulated_profit))  # Compound growth on win
+            stake = max(1.0, stake + max(0, simulated_profit))
 
         time.sleep(5)
 
