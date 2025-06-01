@@ -1,4 +1,12 @@
 import os
+
+LIVE_MODE = os.getenv("LIVE_MODE", "false").lower() == "true"
+
+if not LIVE_MODE:
+    print("🛑 LIVE_MODE is OFF. No trades will happen.")
+    while True:
+        pass  # This keeps the bot alive for logging without trading
+import os
 import time
 import logging
 from flask import Flask
