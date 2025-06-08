@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 
 # API Token setup
 REQUIRED_PIN = os.getenv("REQUIRED_PIN", "5667")
-DERIV_API_TOKEN = os.getenv("***********CtBt")
+DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN")
 
 # Validate token
 if not DERIV_API_TOKEN:
