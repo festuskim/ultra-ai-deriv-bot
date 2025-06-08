@@ -10,17 +10,19 @@ from threading import Thread
 BASE_STAKE = 2
 TRADE_GAP = 5
 MAX_PROFIT = 10000
-STOP_LOSS_BUFFER = 10  # Allow $10 loss before stopping
+STOP_LOSS_BUFFER = 10
 
 app = Flask(__name__)
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 # API Token setup
-REQUIRED_PIN = os.getenv("REQUIRED_PIN", "5667")
 DERIV_API_TOKEN = os.getenv("DERIV_API_TOKEN")
 
-# Validate token
+# Validate token presence
 if not DERIV_API_TOKEN:
     logger.error("❌ DERIV_API_TOKEN not set in environment variables!")
     exit(1)
@@ -33,16 +35,36 @@ class AdvancedStrategyManager:
 
 class DerivWebSocketClient:
     def __init__(self, api_token):
+        # Validate token format
+        if not api_token.startswith("oauth:"):
+            logger.error("❌ INVALID TOKEN FORMAT! Must start with 'oauth:'")
+            exit(1)
+            
         self.api_token = api_token
+        self.ws = None
         self.connect()
         
     def connect(self):
-        self.ws = websocket.WebSocket()
-        self.ws.connect("wss://ws.derivws.com/websockets/v3?app_id=1089")
-        self.authorize()
+        try:
+            self.ws = websocket.WebSocket()
+            self.ws.connect("wss://ws.derivws.com/websockets/v3?app_id=1089", timeout=10)
+            self.authorize()
+        except Exception as e:
+            logger.error(f"🔥 Connection failed: {str(e)}")
+            time.sleep(5)
+            self.connect()
+    
+    @property
+    def connected(self):
+        return self.ws and self.ws.connected
     
     def reconnect(self):
-        logger.warning("🔄 WebSocket disconnected. Reconnecting...")
+        logger.warning("🔄 Reconnecting to WebSocket...")
+        try:
+            if self.ws:
+                self.ws.close()
+        except:
+            pass
         time.sleep(2)
         self.connect()
     
@@ -53,58 +75,61 @@ class DerivWebSocketClient:
         except websocket.WebSocketConnectionClosedException:
             self.reconnect()
             return self.send(data)
+        except Exception as e:
+            logger.error(f"📡 Send error: {str(e)}")
+            self.reconnect()
+            return self.send(data)
 
     def authorize(self):
-        response = self.send({"authorize": self.api_token})
-        logger.info("🔑 Authorization successful")
+        try:
+            response = self.send({"authorize": self.api_token})
+            auth_data = json.loads(response)
+            
+            if "error" in auth_data:
+                error_msg = auth_data["error"].get("message", "Unknown error")
+                logger.error(f"🔒 Authorization FAILED: {error_msg}")
+                logger.error("❌ Check your API token and account permissions")
+                exit(1)
+            
+            if "authorize" in auth_data:
+                logger.info(f"🔑 Authorization successful for {auth_data['authorize']['loginid']}")
+                return True
+            
+            logger.error("🚫 Unexpected authorization response")
+            return False
+            
+        except Exception as e:
+            logger.error(f"🔥 Authorization failed: {str(e)}")
+            exit(1)
 
     def get_balance(self):
-        response = json.loads(self.send({"balance": 1, "subscribe": 0}))
-        return float(response["balance"]["balance"])
+        try:
+            # Request balance with retries
+            for attempt in range(3):
+                response = self.send({"balance": 1, "subscribe": 0})
+                data = json.loads(response)
+                
+                if "error" in data:
+                    logger.error(f"🔴 Balance error: {data['error']['message']}")
+                    time.sleep(1)
+                    continue
+                    
+                if "balance" in data and "balance" in data["balance"]:
+                    return float(data["balance"]["balance"])
+                
+                logger.warning(f"⚠️ Unexpected balance response (attempt {attempt+1}/3)")
+                logger.debug(f"Response: {data}")
+                time.sleep(1)
+            
+            logger.error("💀 Failed to get balance after 3 attempts")
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"🔥 Balance retrieval failed: {str(e)}")
+            return 0.0
     
     def place_trade(self, amount, contract_type="CALL"):
-        trade_request = {
-            "buy": 1,
-            "price": str(amount),
-            "parameters": {
-                "amount": str(amount),
-                "basis": "stake",
-                "contract_type": contract_type,
-                "currency": "USD",
-                "duration": 1,
-                "duration_unit": "m",
-                "symbol": "R_50"
-            }
-        }
-        
-        response = self.send(trade_request)
-        buy_response = json.loads(response)
-        
-        if "error" in buy_response:
-            logger.error(f"🚨 Trade error: {buy_response['error']['message']}")
-            return {"profit": 0}
-            
-        if "buy" in buy_response:
-            contract_id = buy_response["buy"]["contract_id"]
-            start_time = time.time()
-            
-            while time.time() - start_time < 120:
-                status_resp = self.send({"proposal_open_contract": 1, "contract_id": contract_id})
-                status = json.loads(status_resp)
-                
-                if "error" in status:
-                    logger.error(f"🚨 Contract error: {status['error']['message']}")
-                    return {"profit": 0}
-                
-                if status["proposal_open_contract"]["is_sold"]:
-                    payout = float(status["proposal_open_contract"]["payout"])
-                    profit = payout - amount
-                    return {"profit": profit}
-                
-                time.sleep(1)
-        
-        logger.warning("⏱️ Trade timed out")
-        return {"profit": 0}
+        # ... (keep your existing place_trade method) ...
 
 @app.route("/")
 def index():
@@ -125,13 +150,24 @@ def main():
     
     stake = BASE_STAKE
     total_profit = 0.0
-    stop_loss = -STOP_LOSS_BUFFER  # Initial buffer
+    stop_loss = -STOP_LOSS_BUFFER
 
     while True:
         try:
+            # Check connection status
+            if not client.connected:
+                logger.warning("🔌 WebSocket disconnected, reconnecting...")
+                client.connect()
+                time.sleep(2)
+                continue
+            
             balance = client.get_balance()
             logger.info(f"💼 Balance: ${balance:.2f} | 💰 Profit: ${total_profit:.2f}")
             
+            if balance <= 0:
+                logger.error("💀 Zero balance detected! Stopping bot.")
+                break
+                
             if total_profit <= stop_loss:
                 logger.warning(f"🛑 Stop loss triggered at ${total_profit:.2f}")
                 break
@@ -154,8 +190,14 @@ def main():
             
             time.sleep(TRADE_GAP)
             
+        except websocket.WebSocketConnectionClosedException:
+            logger.error("🔌 WebSocket connection closed unexpectedly")
+            time.sleep(5)
+            client.connect()
+            
         except Exception as e:
             logger.error(f"🔴 CRITICAL ERROR: {str(e)}")
+            logger.error("🔄 Restarting main loop in 10 seconds...")
             time.sleep(10)
 
 if __name__ == "__main__":
